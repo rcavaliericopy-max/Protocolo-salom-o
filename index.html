@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Protocolo Salomão | Reprogramação Neural</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              neural: {
+                bg: '#050505',
+                card: '#0a0a0a',
+                accent: '#FFD700', // Dourado
+                purple: '#bd00ff', // Roxo Neon
+                surface: '#121212'
+              }
+            },
+            fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+            animation: { 'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite' }
+          },
+        },
+      }
+    </script>
+    <style>
+      body { background-color: #050505; color: #e5e5e5; overflow-x: hidden; }
+      ::-webkit-scrollbar { width: 6px; }
+      ::-webkit-scrollbar-track { background: #0a0a0a; }
+      ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+      
+      /* Estilo robusto para o Range Input */
+      .seek-slider {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        cursor: pointer;
+        position: absolute;
+        top: 0;
+        left: 0;
+        z-index: 50;
+        margin: 0;
+        touch-action: none;
+      }
+      .seek-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        height: 24px;
+        width: 24px;
+        background: transparent;
+        border: none;
+        border-radius: 50%;
+      }
+      .seek-slider::-moz-range-thumb {
+        height: 24px;
+        width: 24px;
+        background: transparent;
+        border: none;
+        border-radius: 50%;
+      }
+
+      .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+</body>
+</html>
