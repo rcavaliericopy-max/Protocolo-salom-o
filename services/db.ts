@@ -2,11 +2,23 @@ import { AudioTrack, Folder, User } from '../types';
 import { INITIAL_LIBRARY } from '../config/library';
 
 const DB_NAME = 'NeuroFocusDB';
-const DB_VERSION = 11; // Incrementado para forçar re-verificação dos arquivos
+const DB_VERSION = 21; // Versão 21: Força atualização para iOS
 const TRACKS_STORE = 'tracks';
 const FOLDERS_STORE = 'folders';
-const USERS_STORE = 'users';
+const USERS_STORE = 'users'; 
 const SETTINGS_STORE = 'settings';
+
+// Função auxiliar para gerar UUID compatível com iOS antigo/Safari
+export const generateUUID = (): string => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
 
 export class DBService {
   private db: IDBDatabase | null = null;
@@ -25,9 +37,13 @@ export class DBService {
       request.onsuccess = async (event) => {
         this.db = (event.target as IDBOpenDBRequest).result;
         
+        // Tenta popular apenas se estiver vazio
         try {
-            await this.seedDefaultFolders();
-            await this.seedInitialTracks(); 
+            const tracks = await this.getAllTracks();
+            if (tracks.length === 0) {
+                await this.seedDefaultFolders();
+                await this.seedInitialTracks(); 
+            }
         } catch (e) {
             console.warn("Seed process warning:", e);
         }
@@ -69,22 +85,52 @@ export class DBService {
     });
   }
 
+  // --- Função de Reparo (Manual) ---
+  async resetLibrary(): Promise<void> {
+      if (!this.db) await this.init();
+      
+      // 1. Limpa Tracks e Folders
+      const transaction = this.db!.transaction([TRACKS_STORE, FOLDERS_STORE], 'readwrite');
+      transaction.objectStore(TRACKS_STORE).clear();
+      transaction.objectStore(FOLDERS_STORE).clear();
+      
+      return new Promise((resolve, reject) => {
+          transaction.oncomplete = async () => {
+              try {
+                  // 2. Recria os dados
+                  await this.seedDefaultFolders();
+                  await this.seedInitialTracks();
+                  resolve();
+              } catch (e) {
+                  reject(e);
+              }
+          };
+          transaction.onerror = () => reject("Falha ao limpar banco de dados");
+      });
+  }
+
   // --- Seeding (Preenchimento Automático) ---
 
   private async seedDefaultFolders(): Promise<void> {
       const existingFolders = await this.getAllFolders();
 
+      const duplicateFolder = existingFolders.find(f => f.name === 'Reprogramação Neural');
+      if (duplicateFolder) {
+          await this.deleteFolder(duplicateFolder.id);
+          const idx = existingFolders.indexOf(duplicateFolder);
+          if (idx > -1) existingFolders.splice(idx, 1);
+      }
+
       for (const group of INITIAL_LIBRARY) {
-          // Busca case-insensitive
           const exists = existingFolders.some(f => f.name.toLowerCase() === group.folderName.toLowerCase());
           if (!exists) {
               const newFolder: Folder = {
-                  id: crypto.randomUUID(),
+                  id: generateUUID(),
                   name: group.folderName,
                   createdAt: Date.now()
               };
               await this.createFolder(newFolder);
-              console.log(`Pasta criada automaticamente: ${group.folderName}`);
+              console.log(`Pasta criada: ${group.folderName}`);
           }
       }
   }
@@ -98,52 +144,46 @@ export class DBService {
           if (!targetFolder) continue;
 
           for (const trackData of group.tracks) {
-              // Verifica se a música já existe para não duplicar
               const existing = allTracks.find(t => t.name === trackData.name && t.folderId === targetFolder.id);
-              
-              // Se já existe, pulamos.
               if (existing) continue;
 
               try {
-                  // Codifica a URL para aceitar espaços e caracteres especiais (ex: "n°1")
-                  // Ex: "audio/Reprogramar/1 Boas Vindas.mp3"
-                  const urlPath = `audio/${trackData.filename}`;
-                  const encodedUrl = encodeURI(urlPath);
+                  const parts = trackData.filename.split('/');
+                  const encodedFilename = parts.map(part => encodeURIComponent(part)).join('/');
+                  const urlPath = `audio/${encodedFilename}`;
 
-                  console.log(`Tentando baixar: ${encodedUrl}`);
-
-                  const response = await fetch(encodedUrl);
+                  console.log(`Baixando: ${urlPath}`);
+                  const response = await fetch(urlPath);
                   
                   if (!response.ok) {
-                      console.warn(`Arquivo não encontrado no servidor: ${urlPath} (Status: ${response.status})`);
+                      console.warn(`Erro no download (${response.status}): ${urlPath}`);
                       continue;
                   }
                   
                   const blob = await response.blob();
                   
-                  // Se o blob for muito pequeno (ex: página de erro 404 do Netlify), ignorar
-                  if (blob.size < 1000) {
-                      console.warn(`Arquivo parece inválido (muito pequeno): ${urlPath}`);
+                  // Validação extra para iOS (evitar blobs vazios ou HTML de erro)
+                  if (blob.size < 500 || blob.type.includes('html')) { 
+                      console.warn(`Arquivo inválido ignorado: ${urlPath}`);
                       continue;
                   }
 
                   const newTrack: AudioTrack = {
-                      id: crypto.randomUUID(),
+                      id: generateUUID(),
                       folderId: targetFolder.id,
                       name: trackData.name,
                       blob: blob,
                       addedAt: Date.now()
                   };
                   await this.addTrack(newTrack);
-                  console.log(`Música salva no banco: ${trackData.name}`);
               } catch (err) {
-                  console.error(`Erro ao processar música ${trackData.filename}:`, err);
+                  console.error(`Erro crítico ao processar música ${trackData.filename}:`, err);
               }
           }
       }
   }
 
-  // --- Settings (App Cover) ---
+  // --- Settings ---
   
   async saveSetting(key: string, value: any): Promise<void> {
       if (!this.db) await this.init();
@@ -173,6 +213,7 @@ export class DBService {
       if (!this.db) await this.init();
       const adminEmail = "rcavaliericopy@gmail.com";
       const existing = await this.loginUser(adminEmail).catch(() => null);
+      
       if (existing) {
           if(existing.role !== 'admin') {
                const transaction = this.db!.transaction([USERS_STORE], 'readwrite');
@@ -205,7 +246,7 @@ export class DBService {
 
         emailRequest.onsuccess = () => {
             if (emailRequest.result) {
-                reject("E-mail já cadastrado.");
+                reject("E-mail já cadastrado neste dispositivo.");
             } else {
                 const addRequest = store.add(user);
                 addRequest.onsuccess = () => resolve();
@@ -213,6 +254,17 @@ export class DBService {
             }
         };
         emailRequest.onerror = () => reject("Erro ao verificar e-mail.");
+    });
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    if (!this.db) await this.init();
+    return new Promise((resolve, reject) => {
+        const transaction = this.db!.transaction([USERS_STORE], 'readonly');
+        const store = transaction.objectStore(USERS_STORE);
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result as User[]);
+        request.onerror = () => reject("Erro ao listar usuários.");
     });
   }
 
@@ -305,7 +357,7 @@ export class DBService {
     });
   }
 
-  // --- Folders (Playlists) ---
+  // --- Folders ---
 
   async createFolder(folder: Folder): Promise<void> {
     if (!this.db) await this.init();

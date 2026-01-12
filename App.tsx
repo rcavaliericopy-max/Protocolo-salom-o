@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { dbService } from './services/db';
+import { dbService, generateUUID } from './services/db';
 import { AudioTrack, PlayableTrack, LoopMode, Folder, User } from './types';
 
 // Importing new components
@@ -10,7 +10,7 @@ import { FolderGrid } from './components/FolderGrid';
 import { TrackList } from './components/TrackList';
 import { PlayerBar } from './components/PlayerBar';
 import { PlaylistModal } from './components/PlaylistModal';
-import { MagnifyingGlassIcon, UploadIcon } from './components/Icons'; // Kept for empty state
+import { MagnifyingGlassIcon, UploadIcon, WaveformIcon } from './components/Icons'; 
 
 const safeCreateUrl = (blob: Blob | MediaSource | null | undefined): string | undefined => {
     if (blob instanceof Blob || blob instanceof MediaSource) {
@@ -24,6 +24,8 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   // --- App Data State ---
+  const [isInitializing, setIsInitializing] = useState(true); // Loading state
+  const [loadingMessage, setLoadingMessage] = useState('Iniciando sistema...');
   const [allTracks, setAllTracks] = useState<PlayableTrack[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [currentFolderId, setCurrentFolderId] = useState<string>('root');
@@ -37,6 +39,7 @@ const App: React.FC = () => {
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [playlistNameInput, setPlaylistNameInput] = useState('');
   const [playlistCoverPreview, setPlaylistCoverPreview] = useState<string | null>(null);
+  const [isRepairing, setIsRepairing] = useState(false);
   
   // --- Player State ---
   const [queue, setQueue] = useState<PlayableTrack[]>([]);
@@ -54,11 +57,14 @@ const App: React.FC = () => {
 
   // --- Initialization ---
   const init = async () => {
+    setIsInitializing(true);
+    setLoadingMessage('Carregando biblioteca...');
     try {
       await dbService.init();
       await dbService.ensureAdminUser();
       
-      const storedUserId = localStorage.getItem('protocolo_salomao_uid');
+      const storedUserId = localStorage.getItem('protocolo_salomao_uid') || sessionStorage.getItem('protocolo_salomao_uid');
+      
       if (storedUserId) {
           const user = await dbService.getUserById(storedUserId);
           if (user) setCurrentUser(user);
@@ -67,6 +73,8 @@ const App: React.FC = () => {
       await loadMedia();
     } catch (err) {
       console.error("Initialization error", err);
+    } finally {
+      setIsInitializing(false);
     }
   };
 
@@ -104,15 +112,38 @@ const App: React.FC = () => {
 
   useEffect(() => { setSelectedTrackIds(new Set()); }, [currentFolderId]);
 
+  // --- Repair Function ---
+  const handleRepairLibrary = async () => {
+      if(!window.confirm("Isso irá baixar todos os áudios novamente. Requer conexão com a internet. Deseja continuar?")) return;
+      
+      setIsRepairing(true);
+      setLoadingMessage('Baixando áudios do servidor... Isso pode levar alguns minutos no iPhone.');
+      try {
+          await dbService.resetLibrary();
+          alert("Biblioteca atualizada com sucesso! O app será recarregado.");
+          window.location.reload();
+      } catch (err) {
+          alert("Erro ao reparar biblioteca: " + err);
+          setIsRepairing(false);
+      }
+  };
+
   // --- Auth Handlers ---
-  const handleLoginSuccess = (user: User) => {
+  const handleLoginSuccess = (user: User, rememberMe: boolean) => {
     setCurrentUser(user);
-    localStorage.setItem('protocolo_salomao_uid', user.id);
+    if (rememberMe) {
+        localStorage.setItem('protocolo_salomao_uid', user.id);
+        sessionStorage.removeItem('protocolo_salomao_uid');
+    } else {
+        sessionStorage.setItem('protocolo_salomao_uid', user.id);
+        localStorage.removeItem('protocolo_salomao_uid');
+    }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('protocolo_salomao_uid');
+    sessionStorage.removeItem('protocolo_salomao_uid');
     setIsPlaying(false);
     setQueue([]);
     setQueueIndex(-1);
@@ -249,7 +280,7 @@ const App: React.FC = () => {
       const file = files[i];
       if (!file.type.startsWith('audio/')) continue;
       const track: AudioTrack = {
-        id: crypto.randomUUID(), folderId: currentFolderId, name: file.name.replace(/\.[^/.]+$/, ""), blob: file, addedAt: Date.now()
+        id: generateUUID(), folderId: currentFolderId, name: file.name.replace(/\.[^/.]+$/, ""), blob: file, addedAt: Date.now()
       };
       try {
         await dbService.addTrack(track);
@@ -282,7 +313,7 @@ const App: React.FC = () => {
         const coverBlob = file || undefined;
 
         if (modalMode === 'create') {
-            const newFolder: Folder = { id: crypto.randomUUID(), name: name.trim(), createdAt: Date.now(), coverBlob: coverBlob };
+            const newFolder: Folder = { id: generateUUID(), name: name.trim(), createdAt: Date.now(), coverBlob: coverBlob };
             try {
                 await dbService.createFolder(newFolder);
                 setFolders(prev => [{...newFolder, coverUrl: safeCreateUrl(coverBlob)}, ...prev]);
@@ -365,6 +396,17 @@ const App: React.FC = () => {
     return <AuthScreen onLoginSuccess={handleLoginSuccess} />;
   }
 
+  // Se estiver carregando, mostra o spinner
+  if (isInitializing || isRepairing) {
+      return (
+          <div className="flex h-screen w-full bg-neural-bg items-center justify-center flex-col gap-4 p-8 text-center">
+              <div className="w-12 h-12 border-4 border-neural-purple border-t-neural-accent rounded-full animate-spin"></div>
+              <p className="text-gray-400 font-medium animate-pulse">{loadingMessage}</p>
+              {isRepairing && <p className="text-xs text-gray-500 max-w-xs mt-2">Mantenha o app aberto. Isso pode levar alguns minutos se a conexão estiver lenta.</p>}
+          </div>
+      );
+  }
+
   return (
     <div className="flex flex-col h-screen w-full bg-neural-bg text-gray-200 font-sans selection:bg-neural-purple selection:text-white overflow-hidden">
       
@@ -417,13 +459,23 @@ const App: React.FC = () => {
             />
 
             {currentViewTracks.length === 0 && visibleFolders.length === 0 && (
-              <div className="col-span-full py-20 flex flex-col items-center justify-center border-2 border-dashed border-white/5 rounded-2xl">
+              <div className="col-span-full py-20 flex flex-col items-center justify-center border-2 border-dashed border-white/5 rounded-2xl text-center p-6">
                 <div className="w-16 h-16 rounded-full bg-neural-accent/5 flex items-center justify-center mb-4">
-                    {searchQuery ? <MagnifyingGlassIcon className="w-8 h-8 text-neural-accent/50" /> : <UploadIcon className="w-8 h-8 text-neural-accent/50" />}
+                    {searchQuery ? <MagnifyingGlassIcon className="w-8 h-8 text-neural-accent/50" /> : <WaveformIcon className="w-8 h-8 text-neural-accent/50" />}
                 </div>
-                <p className="text-gray-300 font-medium">
+                <p className="text-gray-300 font-medium mb-2">
                     {searchQuery ? 'Nenhum resultado encontrado' : (currentFolderId === 'root' ? 'Biblioteca vazia' : 'Playlist vazia')}
                 </p>
+                
+                {/* Botão de Reparo de Emergência para iOS/Bugs */}
+                {currentFolderId === 'root' && !searchQuery && (
+                  <button 
+                    onClick={handleRepairLibrary}
+                    className="mt-4 px-6 py-2 bg-neural-surface border border-neural-accent/30 text-neural-accent rounded-lg text-sm hover:bg-neural-accent hover:text-black transition-colors"
+                  >
+                    Reparar Biblioteca / Baixar Áudios
+                  </button>
+                )}
               </div>
             )}
 

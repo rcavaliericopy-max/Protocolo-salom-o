@@ -2,7 +2,12 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Protocolo Salomão" />
+    <meta name="format-detection" content="telephone=no" />
+    
     <title>Protocolo Salomão | Reprogramação Neural</title>
     
     <!-- Tailwind CSS -->
@@ -28,7 +33,13 @@
       }
     </script>
     <style>
-      body { background-color: #050505; color: #e5e5e5; overflow-x: hidden; }
+      body { 
+        background-color: #050505; 
+        color: #e5e5e5; 
+        overflow-x: hidden; 
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+      }
       ::-webkit-scrollbar { width: 6px; }
       ::-webkit-scrollbar-track { background: #0a0a0a; }
       ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
