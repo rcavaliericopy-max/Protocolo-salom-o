@@ -1,30 +1,12 @@
 import { AudioTrack, Folder, User } from '../types';
+import { INITIAL_LIBRARY } from '../config/library';
 
 const DB_NAME = 'NeuroFocusDB';
-const DB_VERSION = 9; // Bump version to ensure stores created
+const DB_VERSION = 10; // Incrementado para forçar atualização se necessário
 const TRACKS_STORE = 'tracks';
 const FOLDERS_STORE = 'folders';
 const USERS_STORE = 'users';
 const SETTINGS_STORE = 'settings';
-
-// --- CONFIGURAÇÃO DA BIBLIOTECA INICIAL ---
-const INITIAL_LIBRARY = [
-  {
-    folderName: 'Mantras',
-    tracks: [
-      { filename: 'mantra1.mp3', name: 'Mantra de Cura' },
-      { filename: 'mantra2.mp3', name: 'Frequência 432Hz' }
-    ]
-  },
-  {
-    folderName: 'Reprogramação',
-    tracks: [
-      { filename: 'reprog1.mp3', name: 'Eu Sou Prosperidade' },
-      { filename: 'reprog2.mp3', name: 'Foco Absoluto' },
-      { filename: 'reprog3.mp3', name: 'Autoconfiança Blindada' }
-    ]
-  }
-];
 
 export class DBService {
   private db: IDBDatabase | null = null;
@@ -87,18 +69,17 @@ export class DBService {
     });
   }
 
-  // --- Seeding ---
+  // --- Seeding (Preenchimento Automático) ---
 
   private async seedDefaultFolders(): Promise<void> {
-      const defaults = ['Mantras', 'Reprogramação'];
       const existingFolders = await this.getAllFolders();
 
-      for (const name of defaults) {
-          const exists = existingFolders.some(f => f.name.toLowerCase() === name.toLowerCase());
+      for (const group of INITIAL_LIBRARY) {
+          const exists = existingFolders.some(f => f.name.toLowerCase() === group.folderName.toLowerCase());
           if (!exists) {
               const newFolder: Folder = {
                   id: crypto.randomUUID(),
-                  name: name,
+                  name: group.folderName,
                   createdAt: Date.now()
               };
               await this.createFolder(newFolder);
@@ -108,12 +89,6 @@ export class DBService {
 
   private async seedInitialTracks(): Promise<void> {
       const allTracks = await this.getAllTracks();
-      const hasInitialTracks = allTracks.some(t => 
-        INITIAL_LIBRARY.some(lib => lib.tracks.some(lt => lt.name === t.name))
-      );
-
-      if (hasInitialTracks) return;
-
       const folders = await this.getAllFolders();
 
       for (const group of INITIAL_LIBRARY) {
@@ -121,13 +96,19 @@ export class DBService {
           if (!targetFolder) continue;
 
           for (const trackData of group.tracks) {
-              try {
-                  const response = await fetch(`assets/${trackData.filename}`);
-                  if (!response.ok) continue;
-                  const blob = await response.blob();
-                  const existing = allTracks.find(t => t.name === trackData.name && t.folderId === targetFolder.id);
-                  if (existing) continue;
+              // Verifica se a música já existe para não duplicar
+              const existing = allTracks.find(t => t.name === trackData.name && t.folderId === targetFolder.id);
+              if (existing) continue;
 
+              try {
+                  // Busca o arquivo na pasta 'public/audio'
+                  const response = await fetch(`audio/${trackData.filename}`);
+                  if (!response.ok) {
+                      console.warn(`Arquivo não encontrado: audio/${trackData.filename}`);
+                      continue;
+                  }
+                  
+                  const blob = await response.blob();
                   const newTrack: AudioTrack = {
                       id: crypto.randomUUID(),
                       folderId: targetFolder.id,
@@ -136,7 +117,10 @@ export class DBService {
                       addedAt: Date.now()
                   };
                   await this.addTrack(newTrack);
-              } catch (err) {}
+                  console.log(`Música adicionada: ${trackData.name}`);
+              } catch (err) {
+                  console.error(`Erro ao carregar música ${trackData.filename}:`, err);
+              }
           }
       }
   }
