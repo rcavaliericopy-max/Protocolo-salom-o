@@ -2,7 +2,7 @@ import { AudioTrack, Folder, User } from '../types';
 import { INITIAL_LIBRARY } from '../config/library';
 
 const DB_NAME = 'NeuroFocusDB';
-const DB_VERSION = 10; // Incrementado para forçar atualização se necessário
+const DB_VERSION = 11; // Incrementado para forçar re-verificação dos arquivos
 const TRACKS_STORE = 'tracks';
 const FOLDERS_STORE = 'folders';
 const USERS_STORE = 'users';
@@ -75,6 +75,7 @@ export class DBService {
       const existingFolders = await this.getAllFolders();
 
       for (const group of INITIAL_LIBRARY) {
+          // Busca case-insensitive
           const exists = existingFolders.some(f => f.name.toLowerCase() === group.folderName.toLowerCase());
           if (!exists) {
               const newFolder: Folder = {
@@ -83,6 +84,7 @@ export class DBService {
                   createdAt: Date.now()
               };
               await this.createFolder(newFolder);
+              console.log(`Pasta criada automaticamente: ${group.folderName}`);
           }
       }
   }
@@ -98,17 +100,33 @@ export class DBService {
           for (const trackData of group.tracks) {
               // Verifica se a música já existe para não duplicar
               const existing = allTracks.find(t => t.name === trackData.name && t.folderId === targetFolder.id);
+              
+              // Se já existe, pulamos.
               if (existing) continue;
 
               try {
-                  // Busca o arquivo na pasta 'public/audio'
-                  const response = await fetch(`audio/${trackData.filename}`);
+                  // Codifica a URL para aceitar espaços e caracteres especiais (ex: "n°1")
+                  // Ex: "audio/Reprogramar/1 Boas Vindas.mp3"
+                  const urlPath = `audio/${trackData.filename}`;
+                  const encodedUrl = encodeURI(urlPath);
+
+                  console.log(`Tentando baixar: ${encodedUrl}`);
+
+                  const response = await fetch(encodedUrl);
+                  
                   if (!response.ok) {
-                      console.warn(`Arquivo não encontrado: audio/${trackData.filename}`);
+                      console.warn(`Arquivo não encontrado no servidor: ${urlPath} (Status: ${response.status})`);
                       continue;
                   }
                   
                   const blob = await response.blob();
+                  
+                  // Se o blob for muito pequeno (ex: página de erro 404 do Netlify), ignorar
+                  if (blob.size < 1000) {
+                      console.warn(`Arquivo parece inválido (muito pequeno): ${urlPath}`);
+                      continue;
+                  }
+
                   const newTrack: AudioTrack = {
                       id: crypto.randomUUID(),
                       folderId: targetFolder.id,
@@ -117,9 +135,9 @@ export class DBService {
                       addedAt: Date.now()
                   };
                   await this.addTrack(newTrack);
-                  console.log(`Música adicionada: ${trackData.name}`);
+                  console.log(`Música salva no banco: ${trackData.name}`);
               } catch (err) {
-                  console.error(`Erro ao carregar música ${trackData.filename}:`, err);
+                  console.error(`Erro ao processar música ${trackData.filename}:`, err);
               }
           }
       }
